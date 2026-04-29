@@ -174,7 +174,9 @@ class FSM:
         # Recovery probe only makes sense when the curve controller is MPC
         if self._curve_ctrl == 'mpc':
             try:
-                ref_slice = trajectory[ref_idx:ref_idx + self.mpc.N + 1]
+                ref_slice = trajectory[ref_idx:]
+                if len(ref_slice) < 2:
+                    ref_slice = trajectory[-2:]
                 _, bg_time, bg_status = self.mpc.compute_control(x_curr, ref_slice)
                 if bg_status == 0 and bg_time < MPC_TIMEOUT_S:
                     self._recovery_count += 1
@@ -197,7 +199,10 @@ class FSM:
                 trajectory: List[Dict], ref_idx: int):
         """Run named controller. Returns (u: np.ndarray, solve_time: float, status: int)."""
         if name == 'mpc':
-            ref_slice = trajectory[ref_idx:ref_idx + self.mpc.N + 1]
+            # Pass full remaining track — MPCController builds time-advance ref internally
+            ref_slice = trajectory[ref_idx:]
+            if len(ref_slice) < 2:
+                ref_slice = trajectory[-2:]
             return self.mpc.compute_control(x_curr, ref_slice)
         elif name == 'lqr':
             u = self.lqr.compute_control(x_curr, self._ref_state(trajectory, ref_idx))

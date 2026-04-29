@@ -16,6 +16,20 @@ import os
 import tempfile
 from typing import List, Dict, Tuple
 
+# Pre-load acados shared libs with global visibility before acados_template
+# tries to dlopen them.  Without this, libhpipm.so is not found unless
+# /tmp/acados/lib is already in LD_LIBRARY_PATH (e.g. via the ROS env).
+import ctypes as _ctypes
+_ACADOS_LIB_DIR = '/tmp/acados/lib'
+if os.path.isdir(_ACADOS_LIB_DIR):
+    for _so in ('libblasfeo.so', 'libhpipm.so', 'libacados.so'):
+        _so_path = os.path.join(_ACADOS_LIB_DIR, _so)
+        if os.path.isfile(_so_path):
+            try:
+                _ctypes.CDLL(_so_path, mode=_ctypes.RTLD_GLOBAL)
+            except OSError:
+                pass
+
 from acados_template import AcadosOcp, AcadosOcpSolver, AcadosModel
 from casadi import MX, vertcat, cos, sin, tan
 
@@ -24,7 +38,7 @@ from .bicycle_model import BicycleModel, DELTA_MAX, A_MAX
 
 class MPCController:
     def __init__(self, model: BicycleModel,
-                 N: int = 20,
+                 N: int = 15,
                  dt: float = None,
                  Q: np.ndarray = None,
                  R: np.ndarray = None):
@@ -32,8 +46,11 @@ class MPCController:
         self.N = N
         self.dt = dt or model.dt
 
-        self.Q = Q if Q is not None else np.diag([5.0, 5.0, 6.0, 1.0])
-        self.R = R if R is not None else np.diag([4.0, 0.3])
+        # Q[3] = 6.0 — strong velocity tracking to prevent MPC from
+        # over-speeding on curves (was 1.0, caused 2x v_ref overshoot and
+        # 2.7m CTE on hairpin because car entered corners at 6 m/s vs 1.5 m/s ref).
+        self.Q = Q if Q is not None else np.diag([5.0, 5.0, 6.0, 6.0])
+        self.R = R if R is not None else np.diag([4.0, 0.5])
         self.P_f = 10.0 * self.Q  # terminal cost — heavier to prevent horizon-end drift
 
         self.solver = self._build_solver()
@@ -79,7 +96,7 @@ class MPCController:
         nx = 4  # [px, py, theta, v]
         nu = 2  # [delta, a]
 
-        ocp.solver_options.N_horizon = self.N
+        ocp.solver_options.N_horizon = self.N   # replaces deprecated .N
 
         # LINEAR_LS cost: y = [x; u], cost = (y - y_ref)^T W (y - y_ref)
         ocp.cost.cost_type   = 'LINEAR_LS'
@@ -109,10 +126,12 @@ class MPCController:
         ocp.constraints.ubu    = np.array([ DELTA_MAX,  A_MAX])
         ocp.constraints.idxbu  = np.array([0, 1])
 
-        # State bound: v >= 0 (no reverse)
+        # State bounds: 0 <= v <= 4.0 m/s safety cap
+        # Time-advance reference already encodes the speed profile; this cap is
+        # a hard backstop preventing runaway acceleration at solver-kick-start.
         ocp.constraints.lbx    = np.array([0.0])
-        ocp.constraints.ubx    = np.array([100.0])  # effectively unbounded above
-        ocp.constraints.idxbx  = np.array([3])       # index of v in state
+        ocp.constraints.ubx    = np.array([4.0])
+        ocp.constraints.idxbx  = np.array([3])
 
         # Initial state constraint (set at each call)
         ocp.constraints.x0 = np.zeros(nx)
@@ -129,10 +148,41 @@ class MPCController:
         build_dir = os.path.join(tempfile.gettempdir(), 'kayn_acados')
         os.makedirs(build_dir, exist_ok=True)
         ocp.code_gen_opts.code_export_directory = build_dir
-        ocp.code_gen_opts.json_file = os.path.join(build_dir, 'kayn_ocp.json')
+        ocp.code_gen_opts.json_file = os.path.join(build_dir, 'kayn_ocp.json')  # explicit path
 
         solver = AcadosOcpSolver(ocp)
         return solver
+
+    @staticmethod
+    def _time_advance_ref(full_traj: List[Dict], N: int, dt: float) -> List[Dict]:
+        """
+        Return N+1 time-advanced reference waypoints.
+
+        Instead of spatial indexing (ref[k] = closest[k]), this gives the
+        waypoint the car *should* reach at time k*dt given the reference speed
+        profile.  This is critical on tight curves where N spatial steps cover
+        far less arc than the full curve — spatial indexing would see only the
+        first few metres of a hairpin, time-advance sees all the way around it.
+        """
+        n = len(full_traj)
+        if n < 2:
+            return [full_traj[0]] * (N + 1)
+
+        pts = np.array([[wp['x'], wp['y']] for wp in full_traj])
+        diffs = np.diff(pts, axis=0)
+        arc = np.concatenate([[0.0],
+                               np.cumsum(np.linalg.norm(diffs, axis=1))])
+
+        result: List[Dict] = []
+        s = 0.0
+        for _ in range(N + 1):
+            idx = int(np.searchsorted(arc, s, side='left'))
+            idx = min(idx, n - 1)
+            wp = full_traj[idx]
+            result.append(wp)
+            s += wp['v'] * dt   # advance s by v_ref * dt
+
+        return result
 
     def compute_control(self, x_curr: np.ndarray,
                         ref_traj: List[Dict]) -> Tuple[np.ndarray, float, int]:
@@ -141,7 +191,9 @@ class MPCController:
 
         Args:
             x_curr:   current state [px, py, theta, v]
-            ref_traj: list of >= N+1 dicts {'x','y','theta','v'}
+            ref_traj: remaining trajectory from current ref_idx to end
+                      (pass the full remaining track, not just N+1 points —
+                      _time_advance_ref selects the right waypoints internally)
 
         Returns:
             (u, solve_time_s, status)
@@ -149,17 +201,20 @@ class MPCController:
             solve_time: seconds taken by acados solve()
             status:     0 = feasible, nonzero = infeasible or failure
         """
+        # Build time-advanced reference so MPC looks far ahead on tight curves
+        ref_ta = self._time_advance_ref(ref_traj, self.N, self.dt)
+
         # Pin initial state via equality constraints
         self.solver.set(0, 'lbx', x_curr)
         self.solver.set(0, 'ubx', x_curr)
 
         # Load reference trajectory into every stage cost
         for k in range(self.N):
-            wp = ref_traj[min(k, len(ref_traj) - 1)]
+            wp = ref_ta[k]
             yref = np.array([wp['x'], wp['y'], wp['theta'], wp['v'], 0.0, 0.0])
             self.solver.set(k, 'yref', yref)
 
-        wp_e = ref_traj[min(self.N, len(ref_traj) - 1)]
+        wp_e = ref_ta[self.N]
         self.solver.set(self.N, 'yref',
                         np.array([wp_e['x'], wp_e['y'], wp_e['theta'], wp_e['v']]))
 
