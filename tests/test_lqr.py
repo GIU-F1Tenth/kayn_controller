@@ -1,8 +1,8 @@
 import numpy as np
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from race_monitor.kayn_controller.kayn_controller.controllers.bicycle_model import BicycleModel
-from race_monitor.kayn_controller.kayn_controller.controllers.lqr import LQRController
+from kayn_controller.controllers.bicycle_model import BicycleModel
+from kayn_controller.controllers.lqr import LQRController
 
 
 def test_dare_converges():

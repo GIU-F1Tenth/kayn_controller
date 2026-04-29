@@ -1,8 +1,8 @@
 import numpy as np
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from race_monitor.kayn_controller.kayn_controller.supervisor.curvature import CurvatureEstimator
-from race_monitor.kayn_controller.simulation.track import curve_track, straight_track
+from kayn_controller.supervisor.curvature import CurvatureEstimator
+from simulation.track import curve_track, straight_track
 
 
 def test_circle_curvature():

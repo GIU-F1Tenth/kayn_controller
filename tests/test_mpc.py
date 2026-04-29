@@ -2,9 +2,9 @@ import numpy as np
 import time
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from race_monitor.kayn_controller.kayn_controller.controllers.bicycle_model import BicycleModel
-from race_monitor.kayn_controller.kayn_controller.controllers.mpc import MPCController
-from race_monitor.kayn_controller.simulation.track import curve_track, straight_track
+from kayn_controller.controllers.bicycle_model import BicycleModel
+from kayn_controller.controllers.mpc import MPCController
+from simulation.track import curve_track, straight_track
 
 
 def test_ocp_setup_no_error():

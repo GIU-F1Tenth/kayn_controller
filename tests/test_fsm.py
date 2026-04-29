@@ -1,13 +1,13 @@
 import numpy as np
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from race_monitor.kayn_controller.kayn_controller.controllers.bicycle_model import BicycleModel
-from race_monitor.kayn_controller.kayn_controller.controllers.lqr import LQRController
-from race_monitor.kayn_controller.kayn_controller.controllers.mpc import MPCController
-from race_monitor.kayn_controller.kayn_controller.controllers.stanley import StanleyController
-from race_monitor.kayn_controller.kayn_controller.supervisor.curvature import CurvatureEstimator
-from race_monitor.kayn_controller.kayn_controller.supervisor.fsm import FSM, KAYNState, CONFIRM_STEPS, BLEND_WINDOW, WARMUP_STEPS
-from race_monitor.kayn_controller.simulation.track import straight_track, curve_track
+from kayn_controller.controllers.bicycle_model import BicycleModel
+from kayn_controller.controllers.lqr import LQRController
+from kayn_controller.controllers.mpc import MPCController
+from kayn_controller.controllers.stanley import StanleyController
+from kayn_controller.supervisor.curvature import CurvatureEstimator
+from kayn_controller.supervisor.fsm import FSM, KAYNState, CONFIRM_STEPS, BLEND_WINDOW, WARMUP_STEPS
+from simulation.track import straight_track, curve_track
 
 
 def _make_fsm():
