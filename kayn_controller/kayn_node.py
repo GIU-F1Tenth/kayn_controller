@@ -123,6 +123,7 @@ class KAYNNode(Node):
         self.curv_lookahead = self._p('fsm.lookahead')
         self.enter_threshold = self._p('fsm.enter_threshold')
         self.exit_threshold  = self._p('fsm.exit_threshold')
+        self.mpc_timeout_s   = self._p('mpc.timeout_ms') / 1000.0
 
     def _build_controllers(self):
         model = BicycleModel(L=self.wheelbase, dt=self.dt)
@@ -143,6 +144,7 @@ class KAYNNode(Node):
             fallback_ctrl=self.fallback_ctrl,
             confirm_steps=self.confirm_steps,
             blend_window=self.blend_window,
+            mpc_timeout_s=self.mpc_timeout_s,
             log_fn=self.get_logger().info,
         )
 

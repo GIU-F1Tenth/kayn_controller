@@ -58,6 +58,7 @@ class FSM:
                  fallback_ctrl: str = 'stanley',
                  confirm_steps: int = CONFIRM_STEPS,
                  blend_window: int = BLEND_WINDOW,
+                 mpc_timeout_s: float = MPC_TIMEOUT_S,
                  log_fn=print):
         for slot, val in [('warmup', warmup_ctrl), ('straight', straight_ctrl),
                           ('curve', curve_ctrl),   ('fallback', fallback_ctrl)]:
@@ -75,6 +76,7 @@ class FSM:
         self._fallback_ctrl  = fallback_ctrl
         self._confirm_steps  = confirm_steps
         self._blend_window   = blend_window
+        self._mpc_timeout_s  = mpc_timeout_s
         self._log_fn         = log_fn
 
         self.state = KAYNState.WARMUP
@@ -148,9 +150,9 @@ class FSM:
     def _step_curve(self, x_curr, trajectory, ref_idx, kappa) -> np.ndarray:
         u, solve_time, status = self._ctrl_u(self._curve_ctrl, x_curr, trajectory, ref_idx)
 
-        if self._curve_ctrl == 'mpc' and (status != 0 or solve_time > MPC_TIMEOUT_S):
+        if self._curve_ctrl == 'mpc' and (status != 0 or solve_time > self._mpc_timeout_s):
             reason = (f"solver_timeout={solve_time*1000:.1f}ms"
-                      if solve_time > MPC_TIMEOUT_S else f"infeasible status={status}")
+                      if solve_time > self._mpc_timeout_s else f"infeasible status={status}")
             self._transition(KAYNState.FALLBACK, reason, x_curr, trajectory, ref_idx)
             u_fb, _, _ = self._ctrl_u(self._fallback_ctrl, x_curr, trajectory, ref_idx)
             return u_fb
@@ -184,7 +186,7 @@ class FSM:
                 if len(ref_slice) < 2:
                     ref_slice = trajectory[-2:]
                 _, bg_time, bg_status = self.mpc.compute_control(x_curr, ref_slice)
-                if bg_status == 0 and bg_time < MPC_TIMEOUT_S:
+                if bg_status == 0 and bg_time < self._mpc_timeout_s:
                     self._recovery_count += 1
                 else:
                     self._recovery_count = 0
