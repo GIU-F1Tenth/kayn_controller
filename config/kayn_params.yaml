@@ -1,32 +1,36 @@
 kayn_controller_node:
   ros__parameters:
 
-    # --- Vehicle ---
-    wheelbase: 0.33        # [m]
-    dt: 0.02               # [s] must match control_hz
+    # ── Vehicle ──────────────────────────────────────────────────────────────
+    wheelbase: 0.33        # [m]  kinematic model parameter; must match physical car
+    dt: 0.005              # [s]  integration timestep; must equal 1 / control_hz
+    control_hz: 200.0      # [Hz] control loop rate
 
-    # --- LQR weights: Q=diag([px,py,theta,v]), R=diag([delta,a]) ---
-    lqr.q_px:    5.0
-    lqr.q_py:    5.0
-    lqr.q_theta: 6.0
-    lqr.q_v:     1.0
-    lqr.r_delta: 4.0
-    lqr.r_a:     0.3
+    # ── LQR ──────────────────────────────────────────────────────────────────
+    # Q = diag([q_px, q_py, q_theta, q_v])  state error penalty
+    # R = diag([r_delta, r_a])               control effort penalty
+    lqr.q_px:    5.0   # raise to track lateral position more aggressively
+    lqr.q_py:    5.0   # raise to penalise lateral drift on straights
+    lqr.q_theta: 6.0   # raise if car wanders angularly on straights
+    lqr.q_v:     1.0   # raise to track reference speed more closely
+    lqr.r_delta: 4.0   # raise to damp steering oscillations
+    lqr.r_a:     0.3   # raise for smoother acceleration profile
 
-    # --- MPC ---
-    mpc.horizon_n: 20
+    # ── MPC ───────────────────────────────────────────────────────────────────
+    # Same Q/R semantics as LQR.
+    mpc.horizon_n:  20     # prediction steps; longer = better lookahead, slower solve
     mpc.q_px:    5.0
     mpc.q_py:    5.0
     mpc.q_theta: 6.0
-    mpc.q_v:     1.0
-    mpc.r_delta: 4.0
+    mpc.q_v:     6.0   # strong velocity tracking; prevents overspeeding on curves
+    mpc.r_delta: 4.0   # raise (e.g. 8.0) to smooth MPC steering on tight curves
     mpc.r_a:     0.3
-    mpc.timeout_ms: 5.0    # solver budget [ms]
+    mpc.timeout_ms: 5.0  # solver budget [ms]; exceeded → FSM enters FALLBACK
 
-    # --- Stanley ---
-    stanley.k: 1.5          # cross-track gain
+    # ── Stanley ───────────────────────────────────────────────────────────────
+    stanley.k: 1.5       # cross-track gain; raise for tighter tracking, lower if oscillating
 
-    # --- FSM controller slots ---
+    # ── FSM controller slots ──────────────────────────────────────────────────
     # Each FSM state runs an independently chosen controller.
     # Valid values: "stanley" | "lqr" | "mpc"
     fsm.warmup_controller:   "stanley"
@@ -34,28 +38,29 @@ kayn_controller_node:
     fsm.curve_controller:    "mpc"
     fsm.fallback_controller: "stanley"
 
-    # --- FSM / curvature ---
-    fsm.enter_threshold: 0.10   # kappa to enter CURVE [rad/m]
-    fsm.exit_threshold:  0.06   # kappa to leave CURVE [rad/m]
-    fsm.warmup_steps:    50     # Stanley steps before handing to LQR (1s at 50Hz)
-    fsm.confirm_steps:   3      # consecutive samples before transition
-    fsm.blend_window:    5      # waypoints for blend interpolation
-    fsm.lookahead:       10     # curvature estimator lookahead points
+    # ── FSM timing ────────────────────────────────────────────────────────────
+    fsm.warmup_steps:  50  # steps before leaving WARMUP (50 steps = 0.25 s at 200 Hz)
+    fsm.confirm_steps:  3  # consecutive samples required before any state transition
+    fsm.blend_window:   5  # steps to interpolate between controllers at transitions
 
-    # --- Speed / limits ---
-    max_speed:    8.0     # [m/s]
-    max_steering: 0.4189  # [rad]
-    max_accel:    5.0     # [m/s²]
+    # ── Curvature detection ───────────────────────────────────────────────────
+    # Menger curvature kappa = 1/R [rad/m] estimated over lookahead waypoints.
+    # Hysteresis: exit_threshold must be strictly less than enter_threshold.
+    fsm.enter_threshold: 0.10  # kappa above which CURVE is entered  (R < 10 m)
+    fsm.exit_threshold:  0.06  # kappa below which STRAIGHT re-enters (R > 16.7 m)
+    fsm.lookahead:       10    # waypoints ahead used for curvature estimate
 
-    # --- Control loop ---
-    control_hz: 50.0
+    # ── Speed / limits ────────────────────────────────────────────────────────
+    max_speed:    8.0     # [m/s]   hard cap on trajectory speed setpoint
+    max_steering: 0.4189  # [rad]   must match DELTA_MAX in bicycle_model.py (24°)
+    max_accel:    5.0     # [m/s²]  hard acceleration cap
 
-    # --- Topics ---
-    odom_topic:       "/odom"
+    # ── Topics ────────────────────────────────────────────────────────────────
+    odom_topic:       "/ego_racecar/odom"
     trajectory_topic: "/horizon_mapper/reference_trajectory"
     path_ready_topic: "/horizon_mapper/path_ready"
-    drive_topic:      "/kayn/drive"
+    drive_topic:      "/drive"
 
-    # --- Logging ---
-    debug: false
+    # ── Logging ───────────────────────────────────────────────────────────────
+    debug:       false
     log_every_n: 25
