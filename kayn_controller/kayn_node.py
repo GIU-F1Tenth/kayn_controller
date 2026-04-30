@@ -134,7 +134,8 @@ class KAYNNode(Node):
         )
         self.fsm = FSM(
             lqr=LQRController(model, Q=self.lqr_Q, R=self.lqr_R),
-            mpc=MPCController(model, N=self.mpc_n, Q=self.mpc_Q, R=self.mpc_R),
+            mpc=MPCController(model, N=self.mpc_n, Q=self.mpc_Q, R=self.mpc_R,
+                              v_max=self.max_speed),
             stanley=StanleyController(k=self.stanley_k, model=model),
             curvature_estimator=curv_est,
             warmup_steps=self.warmup_steps,

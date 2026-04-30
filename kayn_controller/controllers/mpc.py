@@ -33,7 +33,7 @@ if os.path.isdir(_ACADOS_LIB_DIR):
 from acados_template import AcadosOcp, AcadosOcpSolver, AcadosModel
 from casadi import MX, vertcat, cos, sin, tan
 
-from .bicycle_model import BicycleModel, DELTA_MAX, A_MAX
+from .bicycle_model import BicycleModel, DELTA_MAX, A_MAX, V_MAX
 
 
 class MPCController:
@@ -41,7 +41,8 @@ class MPCController:
                  N: int = 15,
                  dt: float = None,
                  Q: np.ndarray = None,
-                 R: np.ndarray = None):
+                 R: np.ndarray = None,
+                 v_max: float = V_MAX):
         self.model = model
         self.N = N
         self.dt = dt or model.dt
@@ -52,6 +53,7 @@ class MPCController:
         self.Q = Q if Q is not None else np.diag([5.0, 5.0, 6.0, 6.0])
         self.R = R if R is not None else np.diag([4.0, 0.5])
         self.P_f = 10.0 * self.Q  # terminal cost — heavier to prevent horizon-end drift
+        self.v_max = v_max
 
         self.solver = self._build_solver()
 
@@ -126,11 +128,9 @@ class MPCController:
         ocp.constraints.ubu    = np.array([ DELTA_MAX,  A_MAX])
         ocp.constraints.idxbu  = np.array([0, 1])
 
-        # State bounds: 0 <= v <= 4.0 m/s safety cap
-        # Time-advance reference already encodes the speed profile; this cap is
-        # a hard backstop preventing runaway acceleration at solver-kick-start.
+        # State bounds: 0 <= v <= v_max [m/s] — taken from max_speed in kayn_params.yaml
         ocp.constraints.lbx    = np.array([0.0])
-        ocp.constraints.ubx    = np.array([4.0])
+        ocp.constraints.ubx    = np.array([self.v_max])
         ocp.constraints.idxbx  = np.array([3])
 
         # Initial state constraint (set at each call)
