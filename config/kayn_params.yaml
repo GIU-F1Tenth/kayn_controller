@@ -2,7 +2,7 @@ kayn_controller_node:
   ros__parameters:
 
     # ── Vehicle ──────────────────────────────────────────────────────────────
-    wheelbase: 0.33        # [m]  kinematic model parameter; must match physical car
+    wheelbase: 0.33        # [m]  kinematic model parameter
     dt: 0.005              # [s]  integration timestep; must equal 1 / control_hz
     control_hz: 200.0      # [Hz] control loop rate
 
@@ -19,13 +19,16 @@ kayn_controller_node:
     # ── MPC ───────────────────────────────────────────────────────────────────
     # Same Q/R semantics as LQR.
     mpc.horizon_n:  20     # prediction steps; longer = better lookahead, slower solve
-    mpc.q_px:    5.0
-    mpc.q_py:    5.0
-    mpc.q_theta: 6.0
-    mpc.q_v:     6.0   # strong velocity tracking; prevents overspeeding on curves
-    mpc.r_delta: 4.0   # raise (e.g. 8.0) to smooth MPC steering on tight curves
+    mpc.dt:        0.02   # [s] prediction timestep — independent of control dt.
+                          #     horizon = N × mpc.dt = 20 × 0.02 = 0.4 s lookahead.
+                          #     raise mpc.dt (not N) for longer lookahead without extra solve cost.
+    mpc.q_px:    7.0
+    mpc.q_py:    7.0
+    mpc.q_theta: 5.0
+    mpc.q_v:     8.0   # strong velocity tracking; prevents overspeeding on curves
+    mpc.r_delta: 8.0   # raise to smooth MPC steering on tight curves
     mpc.r_a:     0.3
-    mpc.timeout_ms: 5.0  # solver budget [ms]; exceeded → FSM enters FALLBACK
+    mpc.timeout_ms: 7.0  # solver budget [ms]; exceeded → FSM enters FALLBACK
 
     # ── Stanley ───────────────────────────────────────────────────────────────
     stanley.k: 1.5       # cross-track gain; raise for tighter tracking, lower if oscillating
@@ -34,9 +37,9 @@ kayn_controller_node:
     # Each FSM state runs an independently chosen controller.
     # Valid values: "stanley" | "lqr" | "mpc"
     fsm.warmup_controller:   "stanley"
-    fsm.straight_controller: "lqr"
+    fsm.straight_controller: "mpc"
     fsm.curve_controller:    "mpc"
-    fsm.fallback_controller: "stanley"
+    fsm.fallback_controller: "mpc"
 
     # ── FSM timing ────────────────────────────────────────────────────────────
     fsm.warmup_steps:  50  # steps before leaving WARMUP (50 steps = 0.25 s at 200 Hz)
@@ -51,9 +54,9 @@ kayn_controller_node:
     fsm.lookahead:       10    # waypoints ahead used for curvature estimate
 
     # ── Speed / limits ────────────────────────────────────────────────────────
-    max_speed:    8.0     # [m/s]   hard cap on trajectory speed setpoint
+    max_speed:    8.0     # [m/s]   
     max_steering: 0.4189  # [rad]   must match DELTA_MAX in bicycle_model.py (24°)
-    max_accel:    5.0     # [m/s²]  hard acceleration cap
+    max_accel:    5.0     # [m/s²]  
 
     # ── Topics ────────────────────────────────────────────────────────────────
     odom_topic:       "/ego_racecar/odom"

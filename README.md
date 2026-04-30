@@ -178,7 +178,8 @@ Same Q/R semantics as LQR.
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `mpc.horizon_n` | `20` | Prediction horizon steps. Longer horizon sees further ahead but increases solve time |
+| `mpc.horizon_n` | `20` | Prediction horizon steps. Longer horizon increases solve time — prefer raising `mpc.dt` instead |
+| `mpc.dt` | `0.02` s | Prediction timestep, **independent of `dt` (control rate)**. Effective lookahead = `N × mpc.dt`. At `mpc.dt: 0.02` and `N=20` → 0.4 s lookahead regardless of control frequency. Raise to see further into curves; lower if solver is slow |
 | `mpc.timeout_ms` | `5.0` ms | Solver budget. If exceeded, FSM transitions to FALLBACK. Raise (e.g. `10.0`) if MPC triggers false fallbacks at high speed |
 
 ### Speed / limits

@@ -69,7 +69,7 @@ class KAYNNode(Node):
         p('lqr.q_px', 5.0);          p('lqr.q_py', 5.0)
         p('lqr.q_theta', 6.0);       p('lqr.q_v', 1.0)
         p('lqr.r_delta', 4.0);       p('lqr.r_a', 0.3)
-        p('mpc.horizon_n', 20);      p('mpc.timeout_ms', 5.0)
+        p('mpc.horizon_n', 20);      p('mpc.timeout_ms', 5.0);  p('mpc.dt', 0.02)
         p('mpc.q_px', 5.0);          p('mpc.q_py', 5.0)
         p('mpc.q_theta', 6.0);       p('mpc.q_v', 1.0)
         p('mpc.r_delta', 4.0);       p('mpc.r_a', 0.3)
@@ -94,6 +94,7 @@ class KAYNNode(Node):
         self.wheelbase     = self._p('wheelbase')
         self.dt            = self._p('dt')
         self.mpc_n         = self._p('mpc.horizon_n')
+        self.mpc_dt        = self._p('mpc.dt')
         self.max_speed     = self._p('max_speed')
         self.max_steering  = self._p('max_steering')
         self.max_accel     = self._p('max_accel')
@@ -134,8 +135,8 @@ class KAYNNode(Node):
         )
         self.fsm = FSM(
             lqr=LQRController(model, Q=self.lqr_Q, R=self.lqr_R),
-            mpc=MPCController(model, N=self.mpc_n, Q=self.mpc_Q, R=self.mpc_R,
-                              v_max=self.max_speed),
+            mpc=MPCController(model, N=self.mpc_n, dt=self.mpc_dt,
+                              Q=self.mpc_Q, R=self.mpc_R, v_max=self.max_speed),
             stanley=StanleyController(k=self.stanley_k, model=model),
             curvature_estimator=curv_est,
             warmup_steps=self.warmup_steps,
