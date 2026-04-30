@@ -33,8 +33,12 @@ def _menger(p1: np.ndarray, p2: np.ndarray, p3: np.ndarray) -> float:
 
 
 class CurvatureEstimator:
-    def __init__(self, lookahead: int = 10):
+    def __init__(self, lookahead: int = 10,
+                 enter_threshold: float = ENTER_THRESHOLD,
+                 exit_threshold: float = EXIT_THRESHOLD):
         self.lookahead = lookahead
+        self.enter_threshold = enter_threshold
+        self.exit_threshold = exit_threshold
 
     def estimate(self, trajectory: List[Dict], current_idx: int) -> float:
         """
