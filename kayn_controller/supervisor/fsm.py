@@ -168,8 +168,14 @@ class FSM:
 
     def _step_blend_in(self, x_curr, trajectory, ref_idx) -> np.ndarray:
         alpha = self._blend_step / self._blend_window
-        u_out, _, _ = self._ctrl_u(self._curve_ctrl,    x_curr, trajectory, ref_idx)
-        u_in,  _, _ = self._ctrl_u(self._straight_ctrl, x_curr, trajectory, ref_idx)
+        u_out, solve_time, status = self._ctrl_u(self._curve_ctrl,    x_curr, trajectory, ref_idx)
+        u_in,  _,          _      = self._ctrl_u(self._straight_ctrl, x_curr, trajectory, ref_idx)
+
+        if self._curve_ctrl == 'mpc' and (status != 0 or solve_time > self._mpc_timeout_s):
+            self._transition(KAYNState.STRAIGHT, "blend_in_mpc_infeasible",
+                             x_curr, trajectory, ref_idx)
+            return u_in
+
         u = (1 - alpha) * u_out + alpha * u_in
         self._blend_step += 1
         if self._blend_step >= self._blend_window:
@@ -213,7 +219,10 @@ class FSM:
                 ref_slice = trajectory[-2:]
             return self.mpc.compute_control(x_curr, ref_slice)
         elif name == 'lqr':
-            u = self.lqr.compute_control(x_curr, self._ref_state(trajectory, ref_idx))
+            kappa = self.curv_est.estimate(trajectory, ref_idx)
+            delta_ff = float(np.arctan(self.lqr.model.L * kappa))
+            u = self.lqr.compute_control(x_curr, self._ref_state(trajectory, ref_idx),
+                                          np.array([delta_ff, 0.0]))
             return u, 0.0, 0
         else:  # stanley
             delta = self.stanley.compute_control(x_curr, trajectory)

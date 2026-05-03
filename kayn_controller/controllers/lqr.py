@@ -18,9 +18,9 @@ class LQRController:
                  Q: np.ndarray = None,
                  R: np.ndarray = None):
         self.model = model
-        # Q penalizes [px, py, theta, v] errors
-        self.Q = Q if Q is not None else np.diag([5.0, 5.0, 6.0, 1.0])
-        # R penalizes [delta, a] effort
+        # Q/R match kayn_params.yaml — q_theta=8.0 corrects heading drift on straights;
+        # q_v=2.0 tracks reference speed more closely than the previous 1.0.
+        self.Q = Q if Q is not None else np.diag([6.0, 6.0, 8.0, 2.0])
         self.R = R if R is not None else np.diag([4.0, 0.3])
 
         self._cached_K: np.ndarray = None
@@ -39,7 +39,8 @@ class LQRController:
     def _should_recompute(self, x_ref: np.ndarray, u_ref: np.ndarray) -> bool:
         if self._cached_K is None:
             return True
-        if np.linalg.norm(x_ref - self._cached_x_ref) > self._cache_tol:
+        # Linearization depends only on theta (x_ref[2]) and v (x_ref[3]) — not on px/py
+        if np.linalg.norm(x_ref[2:4] - self._cached_x_ref[2:4]) > self._cache_tol:
             return True
         if np.linalg.norm(u_ref - self._cached_u_ref) > self._cache_tol:
             return True

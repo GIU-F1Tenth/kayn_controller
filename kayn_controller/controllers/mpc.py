@@ -47,11 +47,10 @@ class MPCController:
         self.N = N
         self.dt = dt or model.dt
 
-        # Q[3] = 6.0 — strong velocity tracking to prevent MPC from
-        # over-speeding on curves (was 1.0, caused 2x v_ref overshoot and
-        # 2.7m CTE on hairpin because car entered corners at 6 m/s vs 1.5 m/s ref).
-        self.Q = Q if Q is not None else np.diag([5.0, 5.0, 6.0, 6.0])
-        self.R = R if R is not None else np.diag([4.0, 0.5])
+        # Q/R match kayn_params.yaml — high q_v (9.0) prevents curve over-speeding;
+        # high r_delta (8.0) damps steering oscillations on straights.
+        self.Q = Q if Q is not None else np.diag([7.0, 7.0, 5.0, 9.0])
+        self.R = R if R is not None else np.diag([8.0, 0.3])
         self.P_f = 10.0 * self.Q  # terminal cost — heavier to prevent horizon-end drift
         self.v_max = v_max
 
@@ -208,15 +207,19 @@ class MPCController:
         self.solver.set(0, 'lbx', x_curr)
         self.solver.set(0, 'ubx', x_curr)
 
-        # Load reference trajectory into every stage cost
+        # Load reference trajectory — unwrap theta along the horizon to avoid ±π cost spikes
+        theta_prev = x_curr[2]
         for k in range(self.N):
             wp = ref_ta[k]
-            yref = np.array([wp['x'], wp['y'], wp['theta'], wp['v'], 0.0, 0.0])
-            self.solver.set(k, 'yref', yref)
+            theta_ref = theta_prev + ((wp['theta'] - theta_prev + np.pi) % (2 * np.pi) - np.pi)
+            self.solver.set(k, 'yref',
+                            np.array([wp['x'], wp['y'], theta_ref, wp['v'], 0.0, 0.0]))
+            theta_prev = theta_ref
 
         wp_e = ref_ta[self.N]
+        theta_ref_e = theta_prev + ((wp_e['theta'] - theta_prev + np.pi) % (2 * np.pi) - np.pi)
         self.solver.set(self.N, 'yref',
-                        np.array([wp_e['x'], wp_e['y'], wp_e['theta'], wp_e['v']]))
+                        np.array([wp_e['x'], wp_e['y'], theta_ref_e, wp_e['v']]))
 
         t0 = time.perf_counter()
         status = self.solver.solve()
