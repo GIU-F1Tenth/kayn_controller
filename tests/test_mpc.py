@@ -66,3 +66,31 @@ def test_acados_matches_intuition_on_straight():
     u, _, status = mpc.compute_control(x_curr, ref_traj)
     assert status == 0
     assert abs(u[0]) < 0.05, f"Expected near-zero steering on straight, got {u[0]:.4f}"
+
+
+def test_heading_normalization_near_pi():
+    """MPC must output near-zero steering on a straight near heading ±π."""
+    model = BicycleModel()
+    mpc = MPCController(model)
+
+    # Straight running in -x direction; waypoints alternate ±π to trigger the wrap bug
+    track = []
+    for i in range(40):
+        theta = np.pi if i % 2 == 0 else -np.pi
+        track.append({'x': float(-i) * 0.3, 'y': 0.0, 'theta': theta, 'v': 2.0})
+
+    x_curr = np.array([0.0, 0.0, np.pi, 2.0])
+    u, _, status = mpc.compute_control(x_curr, track)
+    assert status == 0, f"MPC should be feasible near ±π heading (status={status})"
+    assert abs(u[0]) < 0.05, f"Expected near-zero steering near ±π, got delta={u[0]:.4f}"
+
+
+def test_mpc_defaults_match_yaml():
+    """Default-constructed MPCController must match kayn_params.yaml tuning."""
+    model = BicycleModel()
+    mpc = MPCController(model)
+    assert mpc.Q[0, 0] == 7.0, f"q_px default should be 7.0, got {mpc.Q[0,0]}"
+    assert mpc.Q[2, 2] == 5.0, f"q_theta default should be 5.0, got {mpc.Q[2,2]}"
+    assert mpc.Q[3, 3] == 9.0, f"q_v default should be 9.0, got {mpc.Q[3,3]}"
+    assert mpc.R[0, 0] == 8.0, f"r_delta default should be 8.0, got {mpc.R[0,0]}"
+    assert mpc.R[1, 1] == 0.3, f"r_a default should be 0.3, got {mpc.R[1,1]}"

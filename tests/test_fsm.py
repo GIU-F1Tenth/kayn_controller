@@ -139,3 +139,47 @@ def test_fallback_on_mpc_timeout(monkeypatch):
     monkeypatch.setattr(fsm.mpc, 'compute_control', slow_mpc)
     fsm.step(x_curr, track, 10)
     assert fsm.state == KAYNState.FALLBACK, f"Expected FALLBACK, got {fsm.state.name}"
+
+
+def test_blend_in_mpc_infeasible_uses_lqr(monkeypatch):
+    """During BLEND_IN, infeasible MPC must not contaminate output — must transition to STRAIGHT."""
+    fsm = _make_fsm()
+    track = straight_track(length=50.0, v_ref=2.0, n_points=100)
+    x_curr = np.array([track[5]['x'], track[5]['y'], track[5]['theta'], 2.0])
+
+    fsm.state = KAYNState.BLEND_IN
+    fsm._blend_step = 2
+
+    # MPC returns a large delta and infeasible status
+    monkeypatch.setattr(fsm.mpc, 'compute_control',
+                        lambda x, traj: (np.array([0.9, 2.0]), 0.001, 1))
+
+    u = fsm.step(x_curr, track, 5)
+
+    assert abs(u[0]) < 0.5, \
+        f"Infeasible MPC in BLEND_IN must not pass through delta=0.9, got {u[0]:.4f}"
+    assert fsm.state == KAYNState.STRAIGHT, \
+        f"Infeasible MPC in BLEND_IN must transition to STRAIGHT, got {fsm.state.name}"
+
+
+def test_lqr_uses_curvature_feedforward(monkeypatch):
+    """In STRAIGHT state on a curve, LQR must receive non-zero u_ref (curvature feedforward)."""
+    fsm = _make_fsm()
+    fsm.state = KAYNState.STRAIGHT
+    track = curve_track(radius=3.0, sweep_deg=90.0, v_ref=2.0, n_points=100)
+    x_curr = np.array([track[10]['x'], track[10]['y'], track[10]['theta'], 2.0])
+
+    received_u_ref = []
+    orig = fsm.lqr.compute_control
+    def spy(x_c, x_r, u_ref=None):
+        received_u_ref.append(u_ref.copy() if u_ref is not None else None)
+        return orig(x_c, x_r, u_ref)
+    monkeypatch.setattr(fsm.lqr, 'compute_control', spy)
+
+    fsm.step(x_curr, track, 10)
+
+    assert len(received_u_ref) > 0, "LQR must have been called"
+    assert received_u_ref[-1] is not None, \
+        "u_ref must not be None when curvature is non-zero"
+    assert abs(received_u_ref[-1][0]) > 1e-4, \
+        f"Expected non-zero feedforward steering on curve, got {received_u_ref[-1][0]:.6f}"

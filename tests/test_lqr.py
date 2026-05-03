@@ -57,3 +57,35 @@ def test_gain_caching():
     lqr.compute_control(np.array([0.2, 0.1, 0.0, 2.0]), x_ref)
     K_second = lqr._cached_K.copy()
     assert np.allclose(K_first, K_second), "K should be cached for same x_ref"
+
+
+def test_cache_hit_on_straight():
+    """K must NOT be recomputed when only px advances (theta and v unchanged)."""
+    model = BicycleModel(dt=0.02)
+    lqr = LQRController(model)
+
+    call_count = [0]
+    original_gain = lqr.compute_gain
+    def counting_gain(x_ref, u_ref):
+        call_count[0] += 1
+        return original_gain(x_ref, u_ref)
+    lqr.compute_gain = counting_gain
+
+    x_ref1 = np.array([0.0, 0.0, 0.0, 2.0])
+    lqr.compute_control(np.array([0.0, 0.0, 0.0, 2.0]), x_ref1)
+    assert call_count[0] == 1, "First call must compute gain"
+
+    x_ref2 = np.array([0.5, 0.0, 0.0, 2.0])
+    lqr.compute_control(np.array([0.5, 0.0, 0.0, 2.0]), x_ref2)
+    assert call_count[0] == 1, \
+        f"Second call with same theta/v should NOT recompute gain (calls={call_count[0]})"
+
+
+def test_lqr_defaults_match_yaml():
+    """Default-constructed LQRController must match kayn_params.yaml tuning."""
+    model = BicycleModel()
+    lqr = LQRController(model)
+    assert lqr.Q[0, 0] == 6.0, f"q_px default should be 6.0, got {lqr.Q[0,0]}"
+    assert lqr.Q[2, 2] == 8.0, f"q_theta default should be 8.0, got {lqr.Q[2,2]}"
+    assert lqr.Q[3, 3] == 2.0, f"q_v default should be 2.0, got {lqr.Q[3,3]}"
+    assert lqr.R[0, 0] == 4.0, f"r_delta default should be 4.0, got {lqr.R[0,0]}"
