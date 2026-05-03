@@ -9,40 +9,40 @@ kayn_controller_node:
     # ── LQR ──────────────────────────────────────────────────────────────────
     # Q = diag([q_px, q_py, q_theta, q_v])  state error penalty
     # R = diag([r_delta, r_a])               control effort penalty
-    lqr.q_px:    5.0   # raise to track lateral position more aggressively
-    lqr.q_py:    5.0   # raise to penalise lateral drift on straights
-    lqr.q_theta: 6.0   # raise if car wanders angularly on straights
-    lqr.q_v:     1.0   # raise to track reference speed more closely
+    lqr.q_px:    6.0   # raise to track lateral position more aggressively
+    lqr.q_py:    6.0   # raise to penalise lateral drift on straights
+    lqr.q_theta: 8.0   # raise if car wanders angularly on straights
+    lqr.q_v:     2.0   # raise to track reference speed more closely
     lqr.r_delta: 4.0   # raise to damp steering oscillations
     lqr.r_a:     0.3   # raise for smoother acceleration profile
 
     # ── MPC ───────────────────────────────────────────────────────────────────
     # Same Q/R semantics as LQR.
     mpc.horizon_n:  20     # prediction steps; longer = better lookahead, slower solve
-    mpc.dt:        0.02   # [s] prediction timestep — independent of control dt.
-                          #     horizon = N × mpc.dt = 20 × 0.02 = 0.4 s lookahead.
+    mpc.dt:        0.04   # [s] prediction timestep — independent of control dt.
+                          #     horizon = N × mpc.dt = 20 × 0.04 = 0.8 s lookahead.
                           #     raise mpc.dt (not N) for longer lookahead without extra solve cost.
     mpc.q_px:    7.0
     mpc.q_py:    7.0
     mpc.q_theta: 5.0
-    mpc.q_v:     8.0   # strong velocity tracking; prevents overspeeding on curves
+    mpc.q_v:     9.0   # strong velocity tracking; prevents overspeeding on curves
     mpc.r_delta: 8.0   # raise to smooth MPC steering on tight curves
     mpc.r_a:     0.3
     mpc.timeout_ms: 7.0  # solver budget [ms]; exceeded → FSM enters FALLBACK
 
     # ── Stanley ───────────────────────────────────────────────────────────────
-    stanley.k: 1.5       # cross-track gain; raise for tighter tracking, lower if oscillating
+    stanley.k: 1.8       # cross-track gain; raise for tighter tracking, lower if oscillating
 
     # ── FSM controller slots ──────────────────────────────────────────────────
     # Each FSM state runs an independently chosen controller.
     # Valid values: "stanley" | "lqr" | "mpc"
     fsm.warmup_controller:   "stanley"
-    fsm.straight_controller: "mpc"
+    fsm.straight_controller: "lqr"
     fsm.curve_controller:    "mpc"
-    fsm.fallback_controller: "mpc"
+    fsm.fallback_controller: "stanley"
 
     # ── FSM timing ────────────────────────────────────────────────────────────
-    fsm.warmup_steps:  50  # steps before leaving WARMUP (50 steps = 0.25 s at 200 Hz)
+    fsm.warmup_steps:  150  # steps before leaving WARMUP (50 steps = 0.25 s at 200 Hz)
     fsm.confirm_steps:  3  # consecutive samples required before any state transition
     fsm.blend_window:   5  # steps to interpolate between controllers at transitions
 
