@@ -20,7 +20,15 @@ from typing import List, Dict, Tuple
 # tries to dlopen them.  Without this, libhpipm.so is not found unless
 # /tmp/acados/lib is already in LD_LIBRARY_PATH (e.g. via the ROS env).
 import ctypes as _ctypes
-_ACADOS_LIB_DIR = '/tmp/acados/lib'
+_ACADOS_LIB_DIR = (
+    '/tmp/acados/lib'
+    if os.path.isdir('/tmp/acados/lib')
+    else os.environ.get(
+        'ACADOS_LIB_DIR',
+        os.path.join(os.path.dirname(__file__),
+                     '../../../../utilities/acados/lib')
+    )
+)
 if os.path.isdir(_ACADOS_LIB_DIR):
     for _so in ('libblasfeo.so', 'libhpipm.so', 'libacados.so'):
         _so_path = os.path.join(_ACADOS_LIB_DIR, _so)
@@ -75,8 +83,7 @@ class MPCController:
 
         L = self.model.L
 
-        # Continuous bicycle dynamics — same equations as bicycle_model.py
-        # acados uses these symbolically to auto-compute Jacobians for RTI linearization
+        # acados auto-computes RTI Jacobians symbolically from this expression
         f_expl = vertcat(
             v * cos(theta),       # px_dot
             v * sin(theta),       # py_dot
@@ -127,7 +134,7 @@ class MPCController:
         ocp.constraints.ubu    = np.array([ DELTA_MAX,  A_MAX])
         ocp.constraints.idxbu  = np.array([0, 1])
 
-        # State bounds: 0 <= v <= v_max [m/s] — taken from max_speed in kayn_params.yaml
+        # State bounds: 0 <= v <= v_max [m/s]
         ocp.constraints.lbx    = np.array([0.0])
         ocp.constraints.ubx    = np.array([self.v_max])
         ocp.constraints.idxbx  = np.array([3])
@@ -186,21 +193,10 @@ class MPCController:
     def compute_control(self, x_curr: np.ndarray,
                         ref_traj: List[Dict]) -> Tuple[np.ndarray, float, int]:
         """
-        Run one RTI step.
+        Run one RTI step. Pass the full remaining track — _time_advance_ref selects waypoints.
 
-        Args:
-            x_curr:   current state [px, py, theta, v]
-            ref_traj: remaining trajectory from current ref_idx to end
-                      (pass the full remaining track, not just N+1 points —
-                      _time_advance_ref selects the right waypoints internally)
-
-        Returns:
-            (u, solve_time_s, status)
-            u:          [delta, a] clipped to physical limits
-            solve_time: seconds taken by acados solve()
-            status:     0 = feasible, nonzero = infeasible or failure
+        Returns (u, solve_time_s, status): u=[delta,a], status=0 means feasible.
         """
-        # Build time-advanced reference so MPC looks far ahead on tight curves
         ref_ta = self._time_advance_ref(ref_traj, self.N, self.dt)
 
         # Pin initial state via equality constraints

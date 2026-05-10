@@ -34,16 +34,7 @@ class StanleyController:
 
     def compute_control(self, x_curr: np.ndarray,
                         trajectory: List[Dict]) -> float:
-        """
-        Compute Stanley steering angle.
-
-        Args:
-            x_curr:     current state [px, py, theta, v]
-            trajectory: list of {'x','y','theta','v'} dicts
-
-        Returns:
-            delta: steering angle [rad], clipped to [-DELTA_MAX, DELTA_MAX]
-        """
+        """Return steering angle [rad] clipped to [-DELTA_MAX, DELTA_MAX]."""
         fa = self.model.front_axle_pos(x_curr)
         idx = self._find_closest_idx(fa, trajectory)
         wp = trajectory[idx]
@@ -60,10 +51,7 @@ class StanleyController:
         perp = np.array([-np.sin(theta_r), np.cos(theta_r)])  # left-normal
         e_fa = float(np.dot(fa - p_r, perp))
 
-        # Stanley law: psi_e - arctan(k*e_fa/v)
-        # Minus sign aligns CTE correction with bicycle model convention
-        # where positive delta = left turn (increasing theta).
-        # e_fa > 0 (left of track) requires negative delta (right turn) to converge.
+        # Minus sign: e_fa > 0 (left of track) requires negative delta (steer right).
         cte_term = np.arctan2(self.k * e_fa, v + self.epsilon)
         delta = psi_e - cte_term
 

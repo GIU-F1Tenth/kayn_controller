@@ -48,17 +48,7 @@ class LQRController:
 
     def compute_control(self, x_curr: np.ndarray, x_ref: np.ndarray,
                         u_ref: np.ndarray = None) -> np.ndarray:
-        """
-        Compute LQR control input.
-
-        Args:
-            x_curr: current state [px, py, theta, v]
-            x_ref:  reference state [px, py, theta, v]
-            u_ref:  feedforward control [delta, a] (zeros if None)
-
-        Returns:
-            u: [delta, a] clipped to physical limits
-        """
+        """Return u = [delta, a] clipped to physical limits. u_ref is feedforward (default zeros)."""
         if u_ref is None:
             u_ref = np.zeros(2)
 
