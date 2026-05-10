@@ -31,6 +31,9 @@ from typing import List, Dict
 
 from .curvature import CurvatureEstimator
 from .state_handoff import handoff
+from ..controllers.bicycle_model import A_MAX
+
+_STANLEY_V_KP = 2.0  # proportional gain for Stanley speed control [1/s]
 
 BLEND_WINDOW  = 5       # steps for output blending at transitions
 CONFIRM_STEPS = 3       # consecutive samples needed to confirm a transition
@@ -59,6 +62,10 @@ class FSM:
                  confirm_steps: int = CONFIRM_STEPS,
                  blend_window: int = BLEND_WINDOW,
                  mpc_timeout_s: float = MPC_TIMEOUT_S,
+                 v_warmup_min: float = 0.2,
+                 v_stop: float = 0.05,
+                 stop_confirm_steps: int = 20,
+                 dt: float = 0.005,
                  log_fn=print):
         for slot, val in [('warmup', warmup_ctrl), ('straight', straight_ctrl),
                           ('curve', curve_ctrl),   ('fallback', fallback_ctrl)]:
@@ -69,29 +76,51 @@ class FSM:
         self.mpc      = mpc
         self.stanley  = stanley
         self.curv_est = curvature_estimator
-        self._warmup_steps   = warmup_steps
-        self._warmup_ctrl    = warmup_ctrl
-        self._straight_ctrl  = straight_ctrl
-        self._curve_ctrl     = curve_ctrl
-        self._fallback_ctrl  = fallback_ctrl
-        self._confirm_steps  = confirm_steps
-        self._blend_window   = blend_window
-        self._mpc_timeout_s  = mpc_timeout_s
-        self._log_fn         = log_fn
+        self._warmup_steps       = warmup_steps
+        self._warmup_ctrl        = warmup_ctrl
+        self._straight_ctrl      = straight_ctrl
+        self._curve_ctrl         = curve_ctrl
+        self._fallback_ctrl      = fallback_ctrl
+        self._confirm_steps      = confirm_steps
+        self._blend_window       = blend_window
+        self._mpc_timeout_s      = mpc_timeout_s
+        # Convert velocity thresholds [m/s] to per-step distance thresholds [m]
+        self._step_dist_moving  = v_warmup_min * dt   # min displacement per step to count as moving
+        self._step_dist_stopped = v_stop * dt         # max displacement per step to count as stopped
+        self._stop_confirm_steps = stop_confirm_steps
+        self._log_fn             = log_fn
 
         self.state = KAYNState.WARMUP
         self._warmup_count   = 0
         self._confirm_count  = 0
         self._blend_step     = 0
         self._recovery_count = 0
+        self._stop_count     = 0
+        self._prev_pos: np.ndarray = None
 
     def step(self, x_curr: np.ndarray, trajectory: List[Dict],
              ref_idx: int) -> np.ndarray:
         """One FSM control step. Returns u = [delta, a]."""
         kappa = self.curv_est.estimate(trajectory, ref_idx)
 
+        pos = x_curr[:2]
+        step_dist = (float(np.linalg.norm(pos - self._prev_pos))
+                     if self._prev_pos is not None else 0.0)
+        self._prev_pos = pos.copy()
+
+        # Re-enter WARMUP if position stops changing in any running state
+        if self.state != KAYNState.WARMUP:
+            if step_dist < self._step_dist_stopped:
+                self._stop_count += 1
+                if self._stop_count >= self._stop_confirm_steps:
+                    self._transition(KAYNState.WARMUP,
+                                     f"stopped dist/step={step_dist:.4f}m",
+                                     x_curr, trajectory, ref_idx)
+            else:
+                self._stop_count = 0
+
         if self.state == KAYNState.WARMUP:
-            return self._step_warmup(x_curr, trajectory, ref_idx)
+            return self._step_warmup(x_curr, trajectory, ref_idx, step_dist)
         elif self.state == KAYNState.STRAIGHT:
             return self._step_straight(x_curr, trajectory, ref_idx, kappa)
         elif self.state == KAYNState.BLEND_OUT:
@@ -108,21 +137,21 @@ class FSM:
     def state_name(self) -> str:
         return self.state.name
 
-    # ------------------------------------------------------------------
-    # Per-state handlers
-    # ------------------------------------------------------------------
-
-    def _step_warmup(self, x_curr, trajectory, ref_idx) -> np.ndarray:
+    def _step_warmup(self, x_curr, trajectory, ref_idx, step_dist: float = 0.0) -> np.ndarray:
         u, _, _ = self._ctrl_u(self._warmup_ctrl, x_curr, trajectory, ref_idx)
         # Pre-heat straight controller so it's ready immediately after warmup
         try:
             self._ctrl_u(self._straight_ctrl, x_curr, trajectory, ref_idx)
         except Exception:
             pass
-        self._warmup_count += 1
+        # Only count steps where position actually changed; reset if car stalls
+        if step_dist >= self._step_dist_moving:
+            self._warmup_count += 1
+        else:
+            self._warmup_count = 0
         if self._warmup_count >= self._warmup_steps:
             self._transition(KAYNState.STRAIGHT,
-                             f"warmup_complete steps={self._warmup_count}",
+                             f"warmup_complete motion_steps={self._warmup_count}",
                              x_curr, trajectory, ref_idx)
         return u
 
@@ -205,10 +234,6 @@ class FSM:
                                  x_curr, trajectory, ref_idx)
         return u
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
     def _ctrl_u(self, name: str, x_curr: np.ndarray,
                 trajectory: List[Dict], ref_idx: int):
         """Run named controller. Returns (u: np.ndarray, solve_time: float, status: int)."""
@@ -226,7 +251,9 @@ class FSM:
             return u, 0.0, 0
         else:  # stanley
             delta = self.stanley.compute_control(x_curr, trajectory)
-            return np.array([delta, 0.0]), 0.0, 0
+            v_ref = trajectory[min(ref_idx, len(trajectory) - 1)]['v']
+            a = float(np.clip(_STANLEY_V_KP * (v_ref - x_curr[3]), -A_MAX, A_MAX))
+            return np.array([delta, a]), 0.0, 0
 
     def _transition(self, new_state: KAYNState, reason: str,
                     x_curr: np.ndarray, trajectory: List[Dict],
@@ -236,6 +263,10 @@ class FSM:
         self._confirm_count  = 0
         self._blend_step     = 0
         self._recovery_count = 0
+        self._stop_count     = 0
+        if new_state == KAYNState.WARMUP:
+            self._warmup_count = 0
+            self._prev_pos = None
 
         if new_state in (KAYNState.CURVE, KAYNState.BLEND_OUT):
             handoff(self.mpc, x_curr, trajectory, ref_idx)

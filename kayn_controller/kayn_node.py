@@ -84,6 +84,8 @@ class KAYNNode(Node):
         p('fsm.enter_threshold', 0.10); p('fsm.exit_threshold', 0.06)
         p('fsm.confirm_steps', 3);   p('fsm.blend_window', 5)
         p('fsm.lookahead', 10)
+        p('fsm.v_warmup_min', 0.2);  p('fsm.v_stop', 0.05)
+        p('fsm.stop_confirm_steps', 20)
         p('max_speed', 8.0);         p('max_steering', 0.4189); p('max_accel', 5.0)
         p('control_hz', 50.0)
         p('odom_topic', '/odom')
@@ -124,9 +126,12 @@ class KAYNNode(Node):
         self.curve_ctrl     = self._p('fsm.curve_controller')
         self.fallback_ctrl  = self._p('fsm.fallback_controller')
         self.warmup_steps   = self._p('fsm.warmup_steps')
-        self.confirm_steps  = self._p('fsm.confirm_steps')
-        self.blend_window   = self._p('fsm.blend_window')
-        self.curv_lookahead = self._p('fsm.lookahead')
+        self.confirm_steps       = self._p('fsm.confirm_steps')
+        self.blend_window        = self._p('fsm.blend_window')
+        self.curv_lookahead      = self._p('fsm.lookahead')
+        self.v_warmup_min        = self._p('fsm.v_warmup_min')
+        self.v_stop              = self._p('fsm.v_stop')
+        self.stop_confirm_steps  = self._p('fsm.stop_confirm_steps')
         self.enter_threshold = self._p('fsm.enter_threshold')
         self.exit_threshold  = self._p('fsm.exit_threshold')
         self.mpc_timeout_s      = self._p('mpc.timeout_ms') / 1000.0
@@ -155,6 +160,10 @@ class KAYNNode(Node):
             confirm_steps=self.confirm_steps,
             blend_window=self.blend_window,
             mpc_timeout_s=self.mpc_timeout_s,
+            v_warmup_min=self.v_warmup_min,
+            v_stop=self.v_stop,
+            stop_confirm_steps=self.stop_confirm_steps,
+            dt=self.dt,
             log_fn=self.get_logger().info,
         )
 

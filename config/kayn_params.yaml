@@ -42,9 +42,12 @@ kayn_controller_node:
     fsm.fallback_controller: "stanley"
 
     # ── FSM timing ────────────────────────────────────────────────────────────
-    fsm.warmup_steps:  150  # steps before leaving WARMUP (50 steps = 0.25 s at 200 Hz)
-    fsm.confirm_steps:  3  # consecutive samples required before any state transition
-    fsm.blend_window:   5  # steps to interpolate between controllers at transitions
+    fsm.warmup_steps:  150  # consecutive motion steps (v ≥ v_warmup_min) required to exit WARMUP
+    fsm.confirm_steps:  3   # consecutive samples required before any state transition
+    fsm.blend_window:   5   # steps to interpolate between controllers at transitions
+    fsm.v_warmup_min:   0.2   # [m/s] minimum speed to count a warmup step as "moving"
+    fsm.v_stop:         0.05  # [m/s] speed below which car is considered stopped
+    fsm.stop_confirm_steps: 20  # steps below v_stop before re-entering WARMUP
 
     # ── Curvature detection ───────────────────────────────────────────────────
     # Menger curvature kappa = 1/R [rad/m] estimated over lookahead waypoints.
