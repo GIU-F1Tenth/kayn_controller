@@ -38,8 +38,12 @@ if os.path.isdir(_ACADOS_LIB_DIR):
             except OSError:
                 pass
 
-from acados_template import AcadosOcp, AcadosOcpSolver, AcadosModel
-from casadi import MX, vertcat, cos, sin, tan
+try:
+    from acados_template import AcadosOcp, AcadosOcpSolver, AcadosModel
+    from casadi import MX, vertcat, cos, sin, tan
+    ACADOS_AVAILABLE = True
+except ImportError:
+    ACADOS_AVAILABLE = False
 
 from .bicycle_model import BicycleModel
 
@@ -51,6 +55,11 @@ class MPCController:
                  Q: np.ndarray = None,
                  R: np.ndarray = None,
                  v_max: float = None):
+        if not ACADOS_AVAILABLE:
+            raise RuntimeError(
+                "acados is not installed — MPCController cannot be constructed. "
+                "Set fsm.curve_controller to 'lqr' or 'stanley' in kayn_params.yaml."
+            )
         self.model = model
         self.N = N
         self.dt = dt or model.dt
@@ -64,7 +73,7 @@ class MPCController:
 
         self.solver = self._build_solver()
 
-    def _build_acados_model(self) -> AcadosModel:
+    def _build_acados_model(self):
         """Define CasADi symbolic bicycle model — the ODE is visible here, no abstraction."""
         acados_model = AcadosModel()
         acados_model.name = 'kayn_bicycle'
@@ -96,7 +105,7 @@ class MPCController:
         acados_model.f_expl_expr = f_expl
         return acados_model
 
-    def _build_solver(self) -> AcadosOcpSolver:
+    def _build_solver(self):
         """Build the acados OCP solver with HPIPM QP backend and RTI scheme."""
         ocp = AcadosOcp()
         ocp.model = self._build_acados_model()

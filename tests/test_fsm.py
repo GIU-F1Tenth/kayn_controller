@@ -3,20 +3,28 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from kayn_controller.controllers.bicycle_model import BicycleModel
 from kayn_controller.controllers.lqr import LQRController
-from kayn_controller.controllers.mpc import MPCController
+from kayn_controller.controllers.mpc import MPCController, ACADOS_AVAILABLE
 from kayn_controller.controllers.stanley import StanleyController
 from kayn_controller.supervisor.curvature import CurvatureEstimator
 from kayn_controller.supervisor.fsm import FSM, KAYNState, CONFIRM_STEPS, BLEND_WINDOW, WARMUP_STEPS
 from simulation.track import straight_track, curve_track
 
 
-def _make_fsm():
+class MockMPC:
+    """Drop-in MPC stub for tests that don't need real acados."""
+    def compute_control(self, x, traj):
+        return np.zeros(2), 0.001, 0
+
+
+def _make_fsm(**kwargs):
     model = BicycleModel()
+    mpc = MockMPC() if not ACADOS_AVAILABLE else MPCController(model)
     return FSM(
         lqr=LQRController(model),
-        mpc=MPCController(model),
+        mpc=mpc,
         stanley=StanleyController(model=model),
         curvature_estimator=CurvatureEstimator(lookahead=10),
+        **kwargs,
     )
 
 
@@ -91,7 +99,7 @@ def test_curve_slot_lqr_no_fallback(monkeypatch):
     model = BicycleModel()
     fsm = FSM(
         lqr=LQRController(model),
-        mpc=MPCController(model),
+        mpc=MockMPC(),
         stanley=StanleyController(model=model),
         curvature_estimator=CurvatureEstimator(lookahead=10),
         curve_ctrl='lqr',
@@ -99,10 +107,8 @@ def test_curve_slot_lqr_no_fallback(monkeypatch):
     fsm.state = KAYNState.CURVE
     track = curve_track(radius=3.0, sweep_deg=180.0, v_ref=2.0, n_points=300)
     x_curr = np.array([track[10]['x'], track[10]['y'], track[10]['theta'], 2.0])
-
-    original = fsm.mpc.compute_control
     monkeypatch.setattr(fsm.mpc, 'compute_control',
-                        lambda *a, **kw: (original(*a, **kw)[0], 0.010, 0))
+                        lambda *a, **kw: (np.zeros(2), 0.010, 0))
     fsm.step(x_curr, track, 10)
     assert fsm.state != KAYNState.FALLBACK, \
         f"curve_ctrl=lqr should not enter FALLBACK, got {fsm.state.name}"
@@ -115,7 +121,7 @@ def test_invalid_controller_slot_raises():
     with pytest.raises(ValueError):
         FSM(
             lqr=LQRController(model),
-            mpc=MPCController(model),
+            mpc=MockMPC(),
             stanley=StanleyController(model=model),
             curvature_estimator=CurvatureEstimator(lookahead=10),
             curve_ctrl='pure_pursuit',
@@ -127,16 +133,9 @@ def test_fallback_on_mpc_timeout(monkeypatch):
     fsm = _make_fsm()
     track = curve_track(radius=3.0, sweep_deg=180.0, v_ref=2.0, n_points=300)
     x_curr = np.array([track[10]['x'], track[10]['y'], track[10]['theta'], 2.0])
-
-    # Force into CURVE state directly
     fsm.state = KAYNState.CURVE
-
-    original = fsm.mpc.compute_control
-    def slow_mpc(*args, **kwargs):
-        u, _, status = original(*args, **kwargs)
-        return u, 0.010, status  # fake 10ms — exceeds 5ms budget
-
-    monkeypatch.setattr(fsm.mpc, 'compute_control', slow_mpc)
+    monkeypatch.setattr(fsm.mpc, 'compute_control',
+                        lambda *a, **kw: (np.zeros(2), 0.010, 0))
     fsm.step(x_curr, track, 10)
     assert fsm.state == KAYNState.FALLBACK, f"Expected FALLBACK, got {fsm.state.name}"
 
@@ -146,16 +145,11 @@ def test_blend_in_mpc_infeasible_uses_lqr(monkeypatch):
     fsm = _make_fsm()
     track = straight_track(length=50.0, v_ref=2.0, n_points=100)
     x_curr = np.array([track[5]['x'], track[5]['y'], track[5]['theta'], 2.0])
-
     fsm.state = KAYNState.BLEND_IN
     fsm._blend_step = 2
-
-    # MPC returns a large delta and infeasible status
     monkeypatch.setattr(fsm.mpc, 'compute_control',
                         lambda x, traj: (np.array([0.9, 2.0]), 0.001, 1))
-
     u = fsm.step(x_curr, track, 5)
-
     assert abs(u[0]) < 0.5, \
         f"Infeasible MPC in BLEND_IN must not pass through delta=0.9, got {u[0]:.4f}"
     assert fsm.state == KAYNState.STRAIGHT, \
