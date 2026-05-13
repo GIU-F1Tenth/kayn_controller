@@ -158,8 +158,8 @@ class FSM:
             self._ctrl_u(self._straight_ctrl, x_curr, trajectory, ref_idx)
         except Exception:
             pass
-        # Only count steps where position actually changed; reset if car stalls
-        if step_dist >= self._step_dist_moving:
+        # Increment while car is moving; reset only when truly stopped
+        if step_dist >= self._step_dist_stopped:
             self._warmup_count += 1
         else:
             self._warmup_count = 0
