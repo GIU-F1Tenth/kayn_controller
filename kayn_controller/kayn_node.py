@@ -36,9 +36,10 @@ except ImportError:
         cosy = 1.0 - 2.0 * (y * y + z * z)
         return 0.0, 0.0, math.atan2(siny, cosy)
 
+from .logger_utils import KAYNLogger, LogLevel
 from .controllers.bicycle_model import BicycleModel
 from .controllers.lqr import LQRController
-from .controllers.mpc import MPCController
+from .controllers.mpc import MPCController, ACADOS_AVAILABLE
 from .controllers.stanley import StanleyController
 from .controllers.params import WHEELBASE, DELTA_MAX, A_MAX, V_MAX
 from .supervisor.curvature import CurvatureEstimator
@@ -47,9 +48,16 @@ from .supervisor.fsm import FSM
 _CURVE_STATES = {'CURVE', 'BLEND_OUT', 'BLEND_IN'}
 
 
+class _NullMPC:
+    """Placeholder used when acados is unavailable; FSM never calls it after reconfiguration."""
+    def compute_control(self, *args, **kwargs):
+        raise RuntimeError("acados unavailable — MPC must not be called")
+
+
 class KAYNNode(Node):
     def __init__(self):
         super().__init__('kayn_controller_node')
+        self._log = KAYNLogger(self, "KAYNNode")
         self._declare_params()
         self._load_params()
         self._build_controllers()
@@ -57,7 +65,7 @@ class KAYNNode(Node):
         self._setup_subs()
         self._setup_pubs()
         self._setup_timers()
-        self.get_logger().info(
+        self._log.startup(
             f"KAYN ready | {self.control_hz}Hz | "
             f"warmup={self.warmup_ctrl} straight={self.straight_ctrl} "
             f"curve={self.curve_ctrl} fallback={self.fallback_ctrl}"
@@ -140,6 +148,13 @@ class KAYNNode(Node):
         self.straight_speed_scale = self._p('straight_speed_scale')
         self.curve_speed_scale    = self._p('curve_speed_scale')
 
+        if not ACADOS_AVAILABLE and self.curve_ctrl == 'mpc':
+            self._log.critical("acados is not installed — MPC controller unavailable")
+            self._log.warn(
+                f"MPC skipped — curve controller falling back to '{self.fallback_ctrl}'"
+            )
+            self.curve_ctrl = self.fallback_ctrl
+
     def _build_controllers(self):
         model = BicycleModel(L=self.wheelbase, dt=self.dt,
                              delta_max=self.max_steering,
@@ -150,10 +165,15 @@ class KAYNNode(Node):
             enter_threshold=self.enter_threshold,
             exit_threshold=self.exit_threshold,
         )
+        mpc_ctrl = (
+            MPCController(model, N=self.mpc_n, dt=self.mpc_dt,
+                          Q=self.mpc_Q, R=self.mpc_R, v_max=self.max_speed)
+            if ACADOS_AVAILABLE
+            else _NullMPC()
+        )
         self.fsm = FSM(
             lqr=LQRController(model, Q=self.lqr_Q, R=self.lqr_R),
-            mpc=MPCController(model, N=self.mpc_n, dt=self.mpc_dt,
-                              Q=self.mpc_Q, R=self.mpc_R, v_max=self.max_speed),
+            mpc=mpc_ctrl,
             stanley=StanleyController(k=self.stanley_k, model=model),
             curvature_estimator=curv_est,
             warmup_steps=self.warmup_steps,
@@ -168,7 +188,7 @@ class KAYNNode(Node):
             v_stop=self.v_stop,
             stop_confirm_steps=self.stop_confirm_steps,
             dt=self.dt,
-            log_fn=self.get_logger().info,
+            logger=KAYNLogger(self, "FSM"),
         )
 
     def _init_state(self):
@@ -213,7 +233,7 @@ class KAYNNode(Node):
             vy = msg.twist.twist.linear.y
             self.x_curr = np.array([p.x, p.y, yaw, math.sqrt(vx*vx + vy*vy)])
         except Exception as e:
-            self.get_logger().error(f"odom_cb: {e}")
+            self._log.error("odom_cb", exception=e)
 
     def _traj_cb(self, msg: VehicleStateArray):
         if self.reverse_direction:
@@ -233,7 +253,7 @@ class KAYNNode(Node):
         prev = self.path_ready
         self.path_ready = msg.data
         if self.path_ready != prev:
-            self.get_logger().info(f"Path ready: {self.path_ready}")
+            self._log.event("path_ready", f"ready={self.path_ready}")
 
     def _control_cb(self):
         self._iter += 1
@@ -280,20 +300,21 @@ class KAYNNode(Node):
             self._pub_kappa.publish(Float32(data=kappa))
 
             if self.debug or self._iter % self.log_every_n == 0:
-                self.get_logger().info(
+                self._log.info(
                     f"[{self._iter}] mode={self.fsm.state_name} "
                     f"v={self.x_curr[3]:.2f} steer={u[0]:.3f} "
-                    f"kappa={kappa:.3f} cte={cte:.3f}"
+                    f"kappa={kappa:.3f} cte={cte:.3f}",
+                    LogLevel.DEBUG,
                 )
 
         except Exception as e:
-            self.get_logger().error(f"control_cb: {e}")
+            self._log.error("control_cb", exception=e)
             if self.debug:
                 traceback.print_exc()
 
     def _block(self, reason: str):
         if reason != self._last_block:
-            self.get_logger().warning(f"KAYN blocked: {reason}")
+            self._log.warn(f"KAYN blocked: {reason}")
             self._last_block = reason
         drive = AckermannDriveStamped()
         drive.header.stamp = self.get_clock().now().to_msg()
