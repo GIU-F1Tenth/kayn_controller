@@ -35,11 +35,13 @@ def test_initial_state_is_warmup():
 
 def test_warmup_transitions_to_straight():
     """After warmup_steps Stanley steps, FSM must enter STRAIGHT."""
+    model = BicycleModel()
     fsm = _make_fsm()
     track = straight_track(length=200.0, v_ref=2.0, n_points=300)
     x_curr = np.array([track[5]['x'], track[5]['y'], track[5]['theta'], 2.0])
-    for _ in range(WARMUP_STEPS):
-        fsm.step(x_curr, track, 5)
+    for _ in range(WARMUP_STEPS + 1):
+        u = fsm.step(x_curr, track, 5)
+        x_curr = model.step_rk4(x_curr, u)
     assert fsm.state == KAYNState.STRAIGHT, f"Expected STRAIGHT, got {fsm.state.name}"
 
 
