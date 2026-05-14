@@ -90,9 +90,9 @@ class FSM:
         self._confirm_steps      = confirm_steps
         self._blend_window       = blend_window
         self._mpc_timeout_s      = mpc_timeout_s
-        # Convert velocity thresholds [m/s] to per-step distance thresholds [m]
-        self._step_dist_moving  = v_warmup_min * dt   # min displacement per step to count as moving
-        self._step_dist_stopped = v_stop * dt         # max displacement per step to count as stopped
+        # Velocity thresholds [m/s] used for warmup and stop detection.
+        self._speed_moving = v_warmup_min
+        self._speed_stopped = v_stop
         self._stop_confirm_steps = stop_confirm_steps
 
         if callable(logger) and not hasattr(logger, 'event'):
@@ -110,31 +110,26 @@ class FSM:
         self._blend_step     = 0
         self._recovery_count = 0
         self._stop_count     = 0
-        self._prev_pos: np.ndarray = None
 
     def step(self, x_curr: np.ndarray, trajectory: List[Dict],
              ref_idx: int) -> np.ndarray:
         """One FSM control step. Returns u = [delta, a]."""
         kappa = self.curv_est.estimate(trajectory, ref_idx)
+        speed = float(x_curr[3])
 
-        pos = x_curr[:2]
-        step_dist = (float(np.linalg.norm(pos - self._prev_pos))
-                     if self._prev_pos is not None else 0.0)
-        self._prev_pos = pos.copy()
-
-        # Re-enter WARMUP if position stops changing in any running state
+        # Re-enter WARMUP if the vehicle slows to a stop in any running state
         if self.state != KAYNState.WARMUP:
-            if step_dist < self._step_dist_stopped:
+            if speed < self._speed_stopped:
                 self._stop_count += 1
                 if self._stop_count >= self._stop_confirm_steps:
                     self._transition(KAYNState.WARMUP,
-                                     f"stopped dist/step={step_dist:.4f}m",
+                                     f"stopped speed={speed:.3f}m/s",
                                      x_curr, trajectory, ref_idx)
             else:
                 self._stop_count = 0
 
         if self.state == KAYNState.WARMUP:
-            return self._step_warmup(x_curr, trajectory, ref_idx, step_dist)
+            return self._step_warmup(x_curr, trajectory, ref_idx, speed)
         elif self.state == KAYNState.STRAIGHT:
             return self._step_straight(x_curr, trajectory, ref_idx, kappa)
         elif self.state == KAYNState.BLEND_OUT:
@@ -151,17 +146,19 @@ class FSM:
     def state_name(self) -> str:
         return self.state.name
 
-    def _step_warmup(self, x_curr, trajectory, ref_idx, step_dist: float = 0.0) -> np.ndarray:
+    def _step_warmup(self, x_curr, trajectory, ref_idx, speed: float = 0.0) -> np.ndarray:
         u, _, _ = self._ctrl_u(self._warmup_ctrl, x_curr, trajectory, ref_idx)
         # Pre-heat straight controller so it's ready immediately after warmup
         try:
             self._ctrl_u(self._straight_ctrl, x_curr, trajectory, ref_idx)
         except Exception:
             pass
-        # Increment while car is moving; reset only when truly stopped
-        if step_dist >= self._step_dist_stopped:
+        # Hysteresis for warmup counting:
+        # - increment when speed exceeds the 'moving' threshold
+        # - reset only when speed falls below the 'stopped' threshold
+        if speed >= self._speed_moving:
             self._warmup_count += 1
-        else:
+        elif speed < self._speed_stopped:
             self._warmup_count = 0
         if self._warmup_count >= self._warmup_steps:
             self._transition(KAYNState.STRAIGHT,
@@ -350,7 +347,6 @@ class FSM:
         self._stop_count     = 0
         if new_state == KAYNState.WARMUP:
             self._warmup_count = 0
-            self._prev_pos = None
 
         if new_state in (KAYNState.CURVE, KAYNState.BLEND_OUT):
             handoff(self.mpc, x_curr, trajectory, ref_idx)
