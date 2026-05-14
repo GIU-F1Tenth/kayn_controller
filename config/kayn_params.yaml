@@ -42,10 +42,10 @@ kayn_controller_node:
     fsm.fallback_controller: "stanley"
 
     # ── FSM timing ────────────────────────────────────────────────────────────
-    fsm.warmup_steps:  150  # consecutive motion steps (v ≥ v_warmup_min) required to exit WARMUP
+    fsm.warmup_steps:  20  # consecutive motion steps (v ≥ v_warmup_min) required to exit WARMUP
     fsm.confirm_steps:  3   # consecutive samples required before any state transition
     fsm.blend_window:   5   # steps to interpolate between controllers at transitions
-    fsm.v_warmup_min:   0.2   # [m/s] minimum speed to count a warmup step as "moving"
+    fsm.v_warmup_min:   0.02   # [m/s] minimum speed to count a warmup step as "moving"
     fsm.v_stop:         0.05  # [m/s] speed below which car is considered stopped
     fsm.stop_confirm_steps: 20  # steps below v_stop before re-entering WARMUP
 
@@ -76,5 +76,12 @@ kayn_controller_node:
     reverse_direction: true    # Mirror horizon_mapper's reverse_direction flag. 
 
     # ── Logging ───────────────────────────────────────────────────────────────
-    debug:       false
-    log_every_n: 25
+    debug:       true
+    log_every_n: 2
+
+    # ── Publisher ───────────────────────────────────────────────────────────────
+    publish_controller_mode: true
+    publish_fsm_state: true
+    publish_diagnostics: false
+    publish_curvature: false
+    publish_cross_track_error: false

@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-""" KAYN Controller """
-
 import rclpy
 import numpy as np
 import math
@@ -55,7 +53,7 @@ class KAYNNode(Node):
             self._log.set_level(LogLevel.DEBUG if self.debug else LogLevel.NORMAL)
         except Exception:
             self._log.set_level(LogLevel.NORMAL)
-            
+
         self._build_controllers()
         self._init_state()
         self._setup_subs()
@@ -101,6 +99,11 @@ class KAYNNode(Node):
         p('reverse_direction', False)
         p('straight_speed_scale', 1.0)
         p('curve_speed_scale',    1.0)
+        p('publish_diagnostics', False)
+        p('publish_controller_mode', True)
+        p('publish_fsm_state', True)
+        p('publish_curvature', False)
+        p('publish_cross_track_error', False)
 
     def _load_params(self):
         self.wheelbase     = self._p('wheelbase')
@@ -117,6 +120,11 @@ class KAYNNode(Node):
         self.drive_topic   = self._p('drive_topic')
         self.debug         = self._p('debug')
         self.log_every_n   = self._p('log_every_n')
+        self.publish_diagnostics = self._p('publish_diagnostics')
+        self.publish_controller_mode = self._p('publish_controller_mode')
+        self.publish_fsm_state = self._p('publish_fsm_state')
+        self.publish_curvature = self._p('publish_curvature')
+        self.publish_cross_track_error = self._p('publish_cross_track_error')
 
         self.lqr_Q = np.diag([self._p('lqr.q_px'), self._p('lqr.q_py'),
                                self._p('lqr.q_theta'), self._p('lqr.q_v')])
@@ -210,15 +218,28 @@ class KAYNNode(Node):
     def _setup_pubs(self):
         qos = QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
                          durability=DurabilityPolicy.VOLATILE, depth=10)
+
         self._pub_drive = self.create_publisher(AckermannDriveStamped, self.drive_topic, qos)
-        self._pub_mode  = self.create_publisher(String,  '/kayn/mode', qos)
-        self._pub_cte   = self.create_publisher(Float32, '/kayn/cross_track_error', qos)
-        self._pub_kappa = self.create_publisher(Float32, '/kayn/curvature', qos)
-        self._pub_diag  = self.create_publisher(DiagnosticArray, '/kayn/diagnostics', qos)
+        
+        if (self.publish_controller_mode):
+            self._pub_mode  = self.create_publisher(String,  '/kayn/mode', qos)
+        
+        if (self.publish_fsm_state):
+            self._pub_fsm_state = self.create_publisher(String, '/kayn/fsm_state', qos)
+        
+        if (self.publish_cross_track_error):
+            self._pub_cte   = self.create_publisher(Float32, '/kayn/cross_track_error', qos)
+        
+        if (self.publish_curvature):
+            self._pub_kappa = self.create_publisher(Float32, '/kayn/curvature', qos)
+        
+        if (self.publish_diagnostics):
+            self._pub_diag  = self.create_publisher(DiagnosticArray, '/kayn/diagnostics', qos)
 
     def _setup_timers(self):
         self.create_timer(1.0 / self.control_hz, self._control_cb)
-        self.create_timer(1.0, self._diag_cb)
+        if self.publish_diagnostics:
+            self.create_timer(1.0, self._diag_cb)
 
     def _odom_cb(self, msg: Odometry):
         try:
@@ -285,15 +306,23 @@ class KAYNNode(Node):
             self._pub_drive.publish(drive)
 
             # Telemetry
-            self._pub_mode.publish(String(data=self.fsm.state_name))
+            if self.publish_controller_mode:
+                self._pub_mode.publish(String(data=self.fsm.state_name))
+            
+            if self.publish_fsm_state:
+                self._pub_fsm_state.publish(String(data=self.fsm.state_name))
 
-            wp = self.trajectory[self.ref_idx]
-            perp = np.array([-math.sin(wp['theta']), math.cos(wp['theta'])])
-            cte  = float(np.dot(self.x_curr[:2] - np.array([wp['x'], wp['y']]), perp))
-            self._pub_cte.publish(Float32(data=cte))
-
-            kappa = float(self.fsm.curv_est.estimate(self.trajectory, self.ref_idx))
-            self._pub_kappa.publish(Float32(data=kappa))
+            if self.publish_cross_track_error or self.publish_curvature:
+                wp = self.trajectory[self.ref_idx]
+                perp = np.array([-math.sin(wp['theta']), math.cos(wp['theta'])])
+                cte  = float(np.dot(self.x_curr[:2] - np.array([wp['x'], wp['y']]), perp))
+                
+                if self.publish_cross_track_error:
+                    self._pub_cte.publish(Float32(data=cte))
+                
+                if self.publish_curvature:
+                    kappa = float(self.fsm.curv_est.estimate(self.trajectory, self.ref_idx))
+                    self._pub_kappa.publish(Float32(data=kappa))
 
             if self.debug or self._iter % self.log_every_n == 0:
                 self._log.info(
@@ -318,7 +347,6 @@ class KAYNNode(Node):
         self._pub_drive.publish(drive)
 
     def _diag_cb(self):
-        if ()
         msg = DiagnosticArray()
         msg.header.stamp = self.get_clock().now().to_msg()
         s = DiagnosticStatus()
@@ -342,6 +370,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        node._log.shutdown("Shutting down KAYN controller node")
         node.destroy_node()
         rclpy.shutdown()
 
