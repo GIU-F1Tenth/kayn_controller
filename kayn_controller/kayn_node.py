@@ -295,6 +295,9 @@ class KAYNNode(Node):
             u = self.fsm.step(self.x_curr, traj, self.ref_idx)
             self._last_block = None
 
+            kappa = None
+            cte = None
+
             # Drive command
             drive = AckermannDriveStamped()
             drive.header.stamp = self.get_clock().now().to_msg()
@@ -316,19 +319,21 @@ class KAYNNode(Node):
                 wp = self.trajectory[self.ref_idx]
                 perp = np.array([-math.sin(wp['theta']), math.cos(wp['theta'])])
                 cte  = float(np.dot(self.x_curr[:2] - np.array([wp['x'], wp['y']]), perp))
-                
+                kappa = float(self.fsm.curv_est.estimate(self.trajectory, self.ref_idx))
+
                 if self.publish_cross_track_error:
                     self._pub_cte.publish(Float32(data=cte))
-                
+
                 if self.publish_curvature:
-                    kappa = float(self.fsm.curv_est.estimate(self.trajectory, self.ref_idx))
                     self._pub_kappa.publish(Float32(data=kappa))
 
             if self.debug or self._iter % self.log_every_n == 0:
+                kappa_str = f"{kappa:.3f}" if kappa is not None else "n/a"
+                cte_str = f"{cte:.3f}" if cte is not None else "n/a"
                 self._log.info(
                     f"[{self._iter}] mode={self.fsm.state_name} "
                     f"v={self.x_curr[3]:.2f} steer={u[0]:.3f} "
-                    f"kappa={kappa:.3f} cte={cte:.3f}",
+                    f"kappa={kappa_str} cte={cte_str}",
                     LogLevel.DEBUG,
                 )
 
