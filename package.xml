@@ -4,7 +4,7 @@
   <name>kayn_controller</name>
   <version>1.0.0</version>
   <description>KAYN hybrid LQR+MPC+Stanley path-tracking controller for F1TENTH</description>
-  <maintainer email="mohammed@azab.io">Mohammed Azab</maintainer>
+  <maintainer email="m.3zab@outlook.com">Mohammed Azab</maintainer>
   <license>MIT</license>
   <depend>rclpy</depend>
   <depend>nav_msgs</depend>
